@@ -337,6 +337,7 @@ let vue_data = {
     },
     CLISettings: {
       enabled: false,
+      visibilityScope: 'workspace',
       engine: 'local',
       cc_path: '',
     },

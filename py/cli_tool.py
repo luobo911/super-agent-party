@@ -375,7 +375,7 @@ async def get_or_create_docker_sandbox(cwd: str, image_name: str = "docker/sandb
         "docker", "run", "-d",
         "--name", container_name,
         "-v", f"{cwd}:/workspace",  # 映射工作目录
-        "-v", f"{host_skills_dir}:/root/.agents/skills",  # 映射全局skills目录到容器内
+        "-v", f"{host_skills_dir}:/home/agent/.agents/skills",   # 映射全局skills目录到容器内
         "-w", "/workspace",
         "--restart", "unless-stopped",
         image_name,
@@ -1426,38 +1426,88 @@ async def qwen_code_async(prompt: str) -> str | AsyncIterator[str]:
 # ==================== [新增] Skill 专用读取工具 ====================
 
 async def read_skill_tool_logic(cwd: str, skill_id: str, is_docker: bool = True) -> str:
-    """内部通用逻辑：读取 Skill 文件夹结构和说明文档"""
+    """
+    内部通用逻辑：读取 Skill 文件夹结构和说明文档。
+    若工作区不存在该技能，且全局技能目录可用，则自动复制到工作区（Docker/Local 均支持）。
+    """
     skill_rel_path = f".agent/skills/{skill_id}"
-    
-    # 1. 生成文件树命令/逻辑
+    workspace_skill_path = f"/workspace/.agent/skills/{skill_id}" if is_docker else str(Path(cwd) / ".agent" / "skills" / skill_id)
+
+    # ----- 复制逻辑：工作区缺失时，从全局复制 -----
+    if is_docker:
+        # Docker 环境：利用已映射的全局技能目录
+        container_name = await get_or_create_docker_sandbox(cwd)          # 获取/创建容器
+        global_skill_path = f"/home/agent/.agents/skills/{skill_id}"      # 容器内全局技能路径
+        try:
+            # 1. 检查工作区技能是否存在
+            test_cmd = ["test", "-d", workspace_skill_path]
+            await _exec_docker_cmd_simple(cwd, test_cmd)                  # 不存在会抛出异常
+        except Exception:
+            # 2. 工作区不存在，尝试从全局复制
+            try:
+                # 检查全局技能是否存在
+                test_global = ["test", "-d", global_skill_path]
+                await _exec_docker_cmd_simple(cwd, test_global)
+
+                # 确保目标父目录存在
+                mkdir_cmd = ["mkdir", "-p", f"/workspace/.agent/skills"]
+                await _exec_docker_cmd_simple(cwd, mkdir_cmd)
+
+                # 执行复制
+                cp_cmd = ["cp", "-r", global_skill_path, f"/workspace/.agent/skills/"]
+                await _exec_docker_cmd_simple(cwd, cp_cmd)
+
+                print(f"[Skill AutoCopy][Docker] Copied global skill '{skill_id}' to workspace.")
+            except Exception as e:
+                # 复制失败或全局技能不存在，继续尝试读取工作区（若不存在则后续报错）
+                pass
+    else:
+        # Local 环境：使用 shutil 复制（已实现，但整合到 logic 中统一管理）
+        workspace_path = Path(cwd) / ".agent" / "skills" / skill_id
+        if not workspace_path.exists():
+            global_path = Path(SKILLS_DIR) / skill_id
+            if global_path.exists() and global_path.is_dir():
+                try:
+                    workspace_path.parent.mkdir(parents=True, exist_ok=True)
+                    await asyncio.to_thread(
+                        shutil.copytree,
+                        global_path,
+                        workspace_path,
+                        dirs_exist_ok=True
+                    )
+                    print(f"[Skill AutoCopy][Local] Copied global skill '{skill_id}' to workspace.")
+                except Exception as e:
+                    print(f"[Skill AutoCopy][Local] Copy failed: {e}. Will fallback to global read.")
+                    # 降级读取已由主流程处理
+
+    # ----- 原有读取逻辑保持不变（读取工作区技能）-----
     tree_str = ""
     doc_content = ""
-    
+
     if is_docker:
         try:
-            # 获取文件树 (使用 find 命令模拟 tree)
             tree_str = await _exec_docker_cmd_simple(cwd, ["find", skill_rel_path, "-maxdepth", "2", "-not", "-path", '*/.*'])
-            
-            # 查找并读取说明文档
             for name in ["SKILL.md", "skill.md", "SKILLS.md", "skills.md"]:
                 try:
                     doc_path = f"{skill_rel_path}/{name}"
                     doc_content = await _exec_docker_cmd_simple(cwd, ["cat", doc_path])
                     break
-                except: continue
+                except:
+                    continue
         except Exception as e:
             return f"[Error] Skill '{skill_id}' not found or inaccessible in Docker: {str(e)}"
     else:
         try:
             base_path = Path(cwd) / ".agent" / "skills" / skill_id
-            if not base_path.exists(): return f"[Error] Skill '{skill_id}' folder does not exist."
-            
-            # 生成本地文件树
+            if not base_path.exists():
+                return f"[Error] Skill '{skill_id}' folder does not exist in workspace and auto-copy failed or global skill unavailable."
+
+            # 生成本地文件树（深度 ≤2）
             tree_lines = [f"{skill_id}/"]
             for p in base_path.rglob("*"):
                 if p.name.startswith("."): continue
                 depth = len(p.relative_to(base_path).parts)
-                if depth > 2: continue # 限制深度
+                if depth > 2: continue
                 indent = "  " * depth
                 tree_lines.append(f"{indent}{p.name}{'/' if p.is_dir() else ''}")
             tree_str = "\n".join(tree_lines)
