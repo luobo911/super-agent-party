@@ -7618,6 +7618,15 @@ function updateElement(el, rawMarkdown, formatFn) {
                   <div class="plugin-header">
                     <h3>{{ t('agentSkills') }}</h3>
                     <div class="plugin-button-group">
+                      <el-select
+                        style="width: 200px;"
+                        v-model="CLISettings.visibilityScope"
+                        @change="autoSaveSettings"
+                      >
+                        <el-option :label="t('globalSkill')" value="global" ></el-option>
+                        <el-option :label="t('workspaceSkill')" value="workspace" ></el-option>
+                        <el-option :label="t('noneSkill')" value="none" ></el-option>
+                      </el-select>
                       <el-button 
                         @click="showAddSkillDialog = true" 
                         type="primary">

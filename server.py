@@ -347,7 +347,7 @@ import aiofiles
 import argparse
 from py.dify_openai_async import DifyOpenAIAsync
 
-from py.get_setting import EXT_DIR, _copy_default_skills, convert_to_opus_simple, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR
+from py.get_setting import EXT_DIR, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR
 from py.llm_tool import get_image_base64,get_image_media_type
 timetamp = time.time()
 log_path = os.path.join(LOG_DIR, f"backend_{timetamp}.log")
@@ -1280,8 +1280,35 @@ def get_system_context() -> str:
 """
 
 
-async def get_project_skills_summary(cwd: str) -> str:
-    skills_root = Path(cwd) / ".agent" / "skills"
+async def get_project_skills_summary(cwd: str, visibility_scope: str = "workspace") -> str:
+    """
+    根据可见范围返回项目技能摘要
+    
+    Args:
+        cwd: 当前工作目录
+        visibility_scope: 可见范围，可选值: "global", "workspace", "none"
+    
+    Returns:
+        技能摘要字符串
+    """
+    # 如果可见范围设置为 "none"，直接返回空字符串
+    if visibility_scope == "none":
+        return ""
+    
+    # 根据可见范围选择不同的技能目录
+    if visibility_scope == "workspace":
+        # 工作区技能：从项目目录的 .agent/skills 查找
+        skills_root = Path(cwd) / ".agent" / "skills"
+        scope_name = "工作区"
+    elif visibility_scope == "global":
+        # 全局技能：从常量 SKILLS_DIR 查找
+        skills_root = Path(SKILLS_DIR)
+        scope_name = "全局"
+    else:
+        # 未知范围，返回空
+        return ""
+    
+    # 检查技能目录是否存在
     if not skills_root.exists() or not skills_root.is_dir():
         return ""
 
@@ -1301,23 +1328,32 @@ async def get_project_skills_summary(cwd: str) -> str:
                     content = doc_file_path.read_text(encoding='utf-8')
                     if content.startswith("---"):
                         parts = content.split("---", 2)
-                        if len(parts) >= 3: yaml_meta = parts[1].strip()
-                except: pass
+                        if len(parts) >= 3: 
+                            yaml_meta = parts[1].strip()
+                except Exception:
+                    pass
 
             skill_info = f"- **{skill_id}**"
             if yaml_meta:
-                # 提示词中只展示精简的 YAML 元数据
                 skill_info += f":\n```yaml\n{yaml_meta}\n```"
             else:
                 skill_info += " (可用)"
             found_skills_blocks.append(skill_info)
 
-    if not found_skills_blocks: return ""
+    if not found_skills_blocks:
+        return ""
 
-    summary = "\n\n🛠️ **当前项目专属技能 (Agent Skills)**：\n"
-    summary += "检测到本项目特有的 Agent 技能定义。在执行相关任务前，请务必使用读取skill的工具查看技能的完整实现细节和规范：\n\n"
+    # 根据可见范围返回不同的摘要信息
+    summary = f"\n\n🛠️ **{scope_name}技能 ({scope_name} Skills)**：\n"
+    
+    if visibility_scope == "workspace":
+        summary += "检测到本项目特有的 Agent 技能定义。这些技能仅在本工作区内可见：\n\n"
+    elif visibility_scope == "global":
+        summary += "检测到全局 Agent 技能定义。这些技能在所有项目中都可用：\n\n"
+    
     summary += "\n".join(found_skills_blocks)
     summary += "\n\n*提示：你可以通过读取skill的工具获取该技能文件夹的文件树和完整说明文档。*"
+    
     return summary
 
 async def tools_change_messages(request: ChatRequest, settings: dict):
@@ -1329,6 +1365,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
 
     cli_settings = settings.get("CLISettings", {})
     cwd = cli_settings.get("cc_path")
+    visibilityScope = cli_settings.get("visibilityScope", "workspace")
     # 修复：local 环境应该从 localEnvSettings 读取权限模式
     engine = cli_settings.get("engine", "")
     
@@ -1425,7 +1462,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
             # 无论是在 docker 还是 local，逻辑路径通常是一致的（通过挂载）
             # 如果是 Docker 环境且 backend 无法直接访问 cwd，则需通过 docker exec ls 扫描，
             # 但通常项目路径是共享的。
-            skills_message = await get_project_skills_summary(cwd)
+            skills_message = await get_project_skills_summary(cwd, visibilityScope)
             if skills_message:
                 content_append(request.messages, 'system', skills_message)
         except Exception as e:
