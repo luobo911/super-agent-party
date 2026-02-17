@@ -14903,15 +14903,15 @@ async handleRefreshSkills() {
             const data = await res.json();
             
             if (data.success) {
-                this.$message.success(this.t('success') || '创建成功');
+                showNotification(this.t('success'))
                 this.showCreateTaskDialog = false;
                 this.newTaskForm = { title: '', description: '', agent_type: 'default' };
                 this.fetchTasks();
             } else {
-                this.$message.error(data.error || 'Failed');
+                showNotification(data.error, 'error');
             }
         } catch (e) {
-            this.$message.error('Network Error');
+            showNotification(this.t('networkError') || '网络错误', 'error')
         } finally {
             this.isCreatingTask = false;
         }
@@ -14921,7 +14921,7 @@ async handleRefreshSkills() {
     async handleCancelTask(taskId) {
         try {
             await fetch(`/v1/tasks/cancel/${taskId}`, { method: 'POST' });
-            this.$message.info('已发送取消请求');
+            showNotification(this.t('cancelSuccess') || '取消任务成功');
             this.fetchTasks();
         } catch (e) { console.error(e); }
     },
@@ -14934,7 +14934,7 @@ async handleRefreshSkills() {
             });
             
             if (res.ok) {
-                this.$message.success('已删除任务记录');
+                showNotification(this.t('deleteSuccess') || '删除任务成功');
                 this.fetchTasks(); // 刷新列表
             } else {
                 console.error("Delete failed with status:", res.status);
