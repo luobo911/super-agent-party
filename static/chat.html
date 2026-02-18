@@ -1067,6 +1067,18 @@ function updateElement(el, rawMarkdown, formatFn) {
                         <i :class="isSending ? 'fa-solid fa-stop' : 'fa-solid fa-paper-plane'" aria-hidden="true"></i>
                       </el-button>
                     </el-tooltip>
+                    
+                    <el-tooltip :content="t('logoPage')" placement="top">
+                      <el-button
+                        plain
+                        class="icon-btn party-btn"
+                        style="border-radius: 24px;"
+                        @click="showLogoDialog = true"
+                      >
+                        <span>Super Agent Party</span>
+                      </el-button>
+                    </el-tooltip>
+
                   </div>
 
                   <!-- 1. 附件预览区域 -->
