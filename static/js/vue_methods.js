@@ -168,6 +168,8 @@ const IMAGE_MIME_WHITELIST = [
   'image/bmp'
 ];
 
+
+const ALL_ALLOWED_EXTENSIONS = [...new Set([...ALLOWED_EXTENSIONS, ...ALLOWED_IMAGE_EXTENSIONS])];
 let vue_methods = {
   handleUpdateAction() {
     if (this.updateDownloaded) {
@@ -2504,62 +2506,73 @@ let vue_methods = {
     async handleInputPaste(event) {
       const items = (event.clipboardData || window.clipboardData).items;
       
+      // --- 🆕 新增配置: 超过多少字符转为文件 ---
+      const TEXT_TO_FILE_THRESHOLD = 2000; 
+
       const imageFiles = []; // 待上传的图片列表
       const docFiles = [];   // 待上传的普通文件列表
       let hasValidContent = false;
 
-      // 1. 遍历剪贴板项目
+      // 1. 遍历剪贴板中的“文件”项目 (图片或复制的文件)
       for (const item of items) {
         if (item.kind === 'file') {
           const file = item.getAsFile();
           if (!file) continue;
 
-          // 获取文件后缀（小写）
           const ext = (file.name.split('.').pop() || '').toLowerCase();
-          // 判断 MIME 类型是否为图片
           const isImageMime = item.type.startsWith('image/');
 
-          // --- 情况 A: 是图片 (MIME是图片 或 后缀在图片白名单中) ---
+          // --- existing logic for images ---
           if (isImageMime || ALLOWED_IMAGE_EXTENSIONS.includes(ext)) {
-            // 如果文件名是通用的 "image.png" (通常是截图)，或者是无后缀的，给它重命名
-            // 这样可以避免多次截图文件名冲突
             if (file.name === 'image.png' || !file.name.includes('.')) {
               const fileExtension = file.type.split('/')[1] || 'png';
               const namedFile = new File([file], `pasted_image_${Date.now()}.${fileExtension}`, { type: file.type });
               imageFiles.push(namedFile);
             } else {
-              // 如果是从文件夹复制的已有图片，保留原文件名
               imageFiles.push(file);
             }
             hasValidContent = true;
           } 
-          // --- 情况 B: 是普通文件 (后缀在文件白名单中) ---
+          // --- existing logic for docs ---
           else if (ALLOWED_EXTENSIONS.includes(ext)) {
-            // 普通文件直接添加，保留原名
             docFiles.push(file);
             hasValidContent = true;
           }
         }
       }
 
-      // 2. 如果找到了有效内容 (图片或文件)
+      // --- 🆕 2. 如果没有检测到实体文件，检查纯文本是否过长 ---
+      if (!hasValidContent) {
+          const pastedText = event.clipboardData.getData('text');
+          
+          if (pastedText && pastedText.length > TEXT_TO_FILE_THRESHOLD) {
+              // 生成一个临时的 txt 文件
+              // 使用 Date.now() 确保文件名唯一
+              const fileName = `paste_text_${Date.now()}.txt`;
+              const textFile = new File([pastedText], fileName, { type: 'text/plain' });
+
+              // 将其视为普通文档处理
+              docFiles.push(textFile);
+              hasValidContent = true;
+              
+              // 可选：提示用户
+              // this.$message.info(this.t('textToAttachmentHint') || '文本过长，已自动转换为附件发送');
+          }
+      }
+
+      // 3. 如果找到了有效内容 (图片、文件 或 刚刚生成的长文本文件)
       if (hasValidContent) {
-        // 3. 阻止默认粘贴行为 (防止文件名或乱码进入输入框)
+        // 阻止默认粘贴行为 (这对于防止长文本进入输入框至关重要)
         event.preventDefault();
 
-        // 4. 分别处理图片和文件
         if (imageFiles.length > 0) {
           this.addFiles(imageFiles, 'image');
         }
 
         if (docFiles.length > 0) {
+          // 这里会调用你现有的上传逻辑，后端会接收到一个标准的 .txt 文件
           this.addFiles(docFiles, 'file');
         }
-        
-        // 5. 交互优化：如果有文件进入，拉高输入框（可选）
-        // if (this.images.length > 0 || this.files.length > 0) {
-        //   this.isInputExpanded = true;
-        // }
       }
     },
     getRoleAvatar(name) {
@@ -3078,6 +3091,49 @@ let vue_methods = {
       this.autoSaveSettings();
       this.sendMessagesToExtension(); // 发送消息到插件
     },
+
+
+  async browseAllFiles() {
+    if (!this.isElectron) {
+      // 浏览器环境
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.multiple = true
+      // 合并接受的文件类型
+      input.accept = ALL_ALLOWED_EXTENSIONS.map(ext => `.${ext}`).join(',')
+      
+      input.onchange = (e) => {
+        const files = Array.from(e.target.files)
+        // 统一验证：只要在合并后的列表中即可
+        const validFiles = files.filter(file => {
+          const ext = file.name.split('.').pop()?.toLowerCase();
+          return ALL_ALLOWED_EXTENSIONS.includes(ext);
+        })
+        this.handleFiles(validFiles)
+      }
+      input.click()
+    } else {
+      // Electron 环境
+      // 假设你的 electronAPI.openFileDialog 支持多选并返回路径
+      const result = await window.electronAPI.openFileDialog(); 
+      if (!result.canceled) {
+        const files = await Promise.all(
+          result.filePaths
+            .filter(path => {
+              const ext = path.split('.').pop()?.toLowerCase() || '';
+              return ALL_ALLOWED_EXTENSIONS.includes(ext);
+            })
+            .map(async path => {
+              const buffer = await window.electronAPI.readFile(path);
+              const blob = new Blob([buffer]);
+              return new File([blob], path.split(/[\\/]/).pop());
+            })
+        );
+        this.handleFiles(files);
+      }
+    }
+  },
+
     async sendFiles() {
       this.showUploadDialog = true;
       // 设置文件上传专用处理
@@ -3095,6 +3151,7 @@ let vue_methods = {
         this.browseDocuments();
       }
     },
+    
     // 专门处理图片选择
     async browseImages() {
       if (!this.isElectron) {
@@ -3214,26 +3271,57 @@ let vue_methods = {
       const ext = (file.name.split('.').pop() || '').toLowerCase()
       return ALLOWED_IMAGE_EXTENSIONS.includes(ext) || IMAGE_MIME_WHITELIST.some(mime => file.type.includes(mime))
     },
+
+  // 拖拽释放处理
+  async handleInputDrop(event) {
+    this.isDragging = false;
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) {
+      await this.handleFiles(files);
+    }
+  },
+
+  // 粘贴处理 (同时也支持截图粘贴)
+  handleInputPaste(event) {
+    const items = event.clipboardData.items;
+    const files = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file') {
+        files.push(items[i].getAsFile());
+      }
+    }
+    if (files.length > 0) {
+      this.handleFiles(files);
+    }
+  },
+
     // 统一处理文件
     async handleFiles(files) {
-      const allowedExtensions = this.currentUploadType === 'image' ? ALLOWED_IMAGE_EXTENSIONS : ALLOWED_EXTENSIONS;
+      // 1. 合并所有允许的后缀，用于初步过滤
+      const allAllowed = [...ALLOWED_IMAGE_EXTENSIONS, ...ALLOWED_EXTENSIONS];
       
-      const validFiles = files.filter(file => {
+      // 2. 遍历处理每一个选中的文件
+      files.forEach(file => {
         try {
-          // 安全获取文件扩展名
           const filename = file.name || (file.path && file.path.split(/[\\/]/).pop()) || '';
           const ext = filename.split('.').pop()?.toLowerCase() || '';
-          return allowedExtensions.includes(ext);
+
+          // 检查是否在允许名单内
+          if (ALLOWED_IMAGE_EXTENSIONS.includes(ext)) {
+            // 如果是图片，按图片逻辑添加
+            this.addFiles([file], 'image');
+          } else if (ALLOWED_EXTENSIONS.includes(ext)) {
+            // 如果是文档，按文件逻辑添加
+            this.addFiles([file], 'file');
+          } else {
+            // 不支持的类型
+            console.warn(`不支持的文件类型: ${ext}`);
+            // 可以选加：this.showErrorAlert('file'); 
+          }
         } catch (e) {
-          console.error('文件处理错误:', e);
-          return false;
+          console.error('文件分拣错误:', e);
         }
       });
-      if (validFiles.length > 0) {
-        this.addFiles(validFiles, this.currentUploadType);
-      } else {
-        this.showErrorAlert(this.currentUploadType);
-      }
     },
     // 统一处理文件
     async handleReadFiles(files) {
@@ -6979,6 +7067,18 @@ handleCreateSlackSeparator(val) {
         }
       }
       
+      // 销毁 VAD
+      if (this.vad) {
+        this.vad.pause(); // 某些库版本是 destroy() 或 pause()
+        this.vad = null;
+      }
+
+      // 【新增】停止手动获取的流，释放麦克风红点
+      if (this.mediaStream) {
+        this.mediaStream.getTracks().forEach(track => track.stop());
+        this.mediaStream = null;
+      }
+
       // 停止录音和VAD（两种模式都需要）
       this.stopRecording();
     },
@@ -6990,8 +7090,21 @@ handleCreateSlackSeparator(val) {
       if (this.asrSettings.engine === 'webSpeech') {
         min_probabilities = 0.7;
       }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true, // 核心：开启回声消除
+          noiseSuppression: true, // 建议开启：降噪
+          autoGainControl: true   // 建议开启：自动增益
+        }
+      });
+      
+      // 保存流引用，以便后续关闭或用于其他用途（如录音）
+      this.mediaStream = stream; 
+
       // 初始化VAD
       this.vad = await vad.MicVAD.new({
+        stream: stream,
         preSpeechPadFrames: 10,
         onSpeechStart: () => {
           this.ASRrunning = true;
