@@ -3285,15 +3285,23 @@ let vue_methods = {
   handleInputPaste(event) {
     const items = event.clipboardData.items;
     const files = [];
+    let hasFiles = false;
+    
     for (let i = 0; i < items.length; i++) {
       if (items[i].kind === 'file') {
         files.push(items[i].getAsFile());
+        hasFiles = true;
       }
     }
-    if (files.length > 0) {
+    
+    if (hasFiles) {
+      // 有文件时阻止默认行为
+      event.preventDefault();
       this.handleFiles(files);
     }
+    // 没有文件时，让浏览器正常处理文本粘贴
   },
+
 
     // 统一处理文件
     async handleFiles(files) {
