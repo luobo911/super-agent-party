@@ -1106,9 +1106,9 @@ function updateElement(el, rawMarkdown, formatFn) {
                       
                       <!-- 模型指示器 -->
                       <el-tooltip :content="t('clickToSwitchModel')" placement="top" :show-after="500">
-                        <div class="status-pill" v-if="settings?.model !== ''" @click="showModelDialog = true">
+                        <div class="status-pill" @click="showModelDialog = true">
                           <i class="fa-solid fa-microchip"></i>
-                          <span class="pill-text">{{ settings.model }}</span>
+                          <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
                         </div>
                       </el-tooltip>
                       
