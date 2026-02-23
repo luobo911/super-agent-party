@@ -1319,6 +1319,23 @@ async def read_todos_local(cwd: str) -> list:
         print(f"Error reading todos: {e}")
         return []
 
+async def read_agents_md(cwd: str) -> str:  # 返回str而不是list
+    """读取本地AGENTS.md文件内容"""
+    agents_md_path = Path(cwd) / "AGENTS.md"
+    
+    if not agents_md_path.exists():
+        return ""
+    
+    try:
+        async with aiofiles.open(agents_md_path, 'r', encoding='utf-8') as f:
+            content = await f.read()
+            return content
+    except FileNotFoundError:
+        # 文件在检查后又被删除的情况
+        return ""
+    except Exception as e:
+        print(f"Error reading AGENTS.md: {e}")
+        return ""
 
 def get_system_context() -> str:
     """
@@ -1536,32 +1553,10 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
         todos = []
         
         try:
-            if engine == "ds":
-                # Docker 环境（已有代码保持不变）
-                abs_path = str(Path(cwd).resolve())
-                path_hash = hashlib.md5(abs_path.encode()).hexdigest()[:12]
-                container_name = f"sandbox-{path_hash}"
-                
-                proc = await asyncio.create_subprocess_exec(
-                    "docker", "exec", container_name, 
-                    "cat", "/workspace/.agent/ai_todos.json",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                
-                if proc.returncode == 0 and stdout:
-                    try:
-                        todos = json.loads(stdout.decode('utf-8'))
-                    except json.JSONDecodeError:
-                        todos = []
-                        
-            else:  # local 环境
-                todos = await read_todos_local(cwd)
+            todos = await read_todos_local(cwd)
             
             # 处理待办事项（原有逻辑）
             if isinstance(todos, list) and len(todos) > 0:
-                # ... 原有待办事项格式化代码保持不变 ...
                 priority_icons = {"high": "🔴", "medium": "🟡", "low": "🟢"}
                 status_icons = {
                     "pending": "⏳", 
@@ -1604,6 +1599,14 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
                 
         except Exception as e:
             print(f"[Todo Loader] 跳过待办事项加载: {e}")
+            pass
+
+        try:
+            agents_md = await read_agents_md(cwd)
+            if agents_md:
+                content_append(request.messages, 'system', " **重要事项**（AGENTS.md）：\n\n"+agents_md+"\n\n")
+        except Exception as e:
+            print(f"[Agent Loader] 跳过AGENTS.md加载: {e}")
             pass
 
         try:
