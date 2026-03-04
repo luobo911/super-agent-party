@@ -13944,6 +13944,23 @@ function updateElement(el, rawMarkdown, formatFn) {
                         </el-input>
                       </el-form-item>
                       <!-- API端点 -->
+                      <el-form-item :label="t('360apiEndpoint')" class="form-item-align" label-position="top">
+                        <el-input
+                          :value="partyURL+'/vrm.html?mode=render'"
+                          readonly
+                          class="full-width-input"
+                        >
+                          <template #append>
+                            <el-button
+                              @click="copyVrmEndpoint"
+                              class="copy-btn"
+                            >
+                            <i class="fa-solid fa-copy"></i>
+                            </el-button>
+                          </template>
+                        </el-input>
+                      </el-form-item>
+                      <!-- API端点 -->
                       <el-form-item :label="t('vmcpReceive')" class="form-item-align" label-position="top">
                         <el-input
                           value="http://127.0.0.1:39539"
