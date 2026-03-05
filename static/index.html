@@ -4954,7 +4954,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           v-model="settings.temperature"
                           :min="0"
                           :max="1"
-                          :step="0.1"
+                          :step="0.01"
                           show-input
                           @input="autoSaveSettings"
                         />
@@ -4964,7 +4964,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           v-model="settings.top_p"
                           :min="0"
                           :max="1"
-                          :step="0.1"
+                          :step="0.01"
                           show-input
                           @input="autoSaveSettings"
                         />
